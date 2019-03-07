@@ -9,6 +9,7 @@ class Node(object):
     self.code = code
     self.parent = None
     self.children = []
+    self._code_2_idx = None
 
   def add_child(self, child):
     if child not in self.children:
@@ -83,7 +84,7 @@ class ICD9(Node):
     self.depth2nodes = defaultdict(dict)
     super(ICD9, self).__init__(-1, 'ROOT')
 
-    with file(codesfname, 'r') as f:
+    with open(codesfname, 'r') as f:
       allcodes = json.loads(f.read())
       self.process(allcodes)
 
@@ -108,6 +109,48 @@ class ICD9(Node):
       node.parent = prev_node
       prev_node.add_child(node)
       prev_node = node
+
+  def build_df_idx(self, df, codes="LABELS"):
+      """Helper to build index from ICD9 nodes to dataframe
+
+      This helper builds an index from ICD9 nodes to all dataframe
+      row indices corresponding to the node and all of its children.
+
+      This approach is a little memory hungry but supports very
+      fast lookup of rows for any ICD9 node.
+
+      This assumes that the ICD9 codes are provided as ';' delimited
+      strings as in the CAML MIMIC III pipeline.
+
+      df : pd.DataFrame
+      codes : string, name of column with ICD9 codes
+      """
+      self._code_2_idx = defaultdict(list)
+
+      # Fills missing with empty string and dedupes with sets
+      df[codes].fillna('', inplace=True)
+      df[codes] = df[codes].str.split(';').apply(set)
+
+      for index, row in df.iterrows():
+          for code in row[codes]:
+              self._code_2_idx[code].append(index)
+
+  def node_2_idx(self, node):
+      """Get idxs for rows corresponding to node and its descendents"""
+      if self._code_2_idx is None:
+          print("Need to build index on dataframe first.")
+          return None
+
+      idx = set()
+      root = self.find(node)
+
+      if root is None:
+        print("Node {} not found.".format(node))
+        return None
+      else:
+        for leaf in root.leaves:
+            idx = idx.union(set(self._code_2_idx[leaf.code]))
+        return list(idx)
 
 
 if __name__ == '__main__':
